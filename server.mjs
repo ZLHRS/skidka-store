@@ -1,10 +1,19 @@
 import http from 'node:http';
 import {isIP} from 'node:net';
-import {mkdirSync} from 'node:fs';
-import {dirname,resolve} from 'node:path';
+import {mkdirSync,readFileSync,writeFileSync,renameSync,statSync} from 'node:fs';
+import {dirname,resolve,join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import worker from './worker/index.js';
 import {localDB} from './lib/local-db.mjs';
+import {magnumCache} from './lib/magnum-cache.js';
+
+export function configureCataloguePersistence(dbPath){
+ const folder=dirname(dbPath);mkdirSync(folder,{recursive:true,mode:0o700});
+ const file=city=>join(folder,'catalogue-'+city+'.json');
+ for(const city of ['astana','petropavlovsk'])try{if(statSync(file(city)).size<6000000)magnumCache.restore(city,JSON.parse(readFileSync(file(city),'utf8')))}catch(e){if(e.code!=='ENOENT')console.warn('Catalogue restore failed:',e.message)}
+ magnumCache.setPersistence((city,snapshot)=>{writeFileSync(file(city)+'.tmp',JSON.stringify(snapshot),{mode:0o600});renameSync(file(city)+'.tmp',file(city))});
+ for(const city of ['astana','petropavlovsk'])void magnumCache.read(city);
+}
 
 export function configFromEnv(env=process.env){
  if(!env.PUBLIC_ORIGIN)throw new Error('Set PUBLIC_ORIGIN, for example https://your-domain.kz');
@@ -47,6 +56,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).hr
  if(Number(process.versions.node.split('.')[0])!==24)throw new Error('This package is tested with Node.js 24.x');
  process.umask(0o077);
  const config=configFromEnv(),server=createVpsServer(config);
+ configureCataloguePersistence(config.dbPath);
  server.listen(config.port,'127.0.0.1',()=>console.log('По скидке:',config.origin,'upstream 127.0.0.1:'+config.port));
  for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>{server.close(()=>process.exit(0));setTimeout(()=>{server.closeAllConnections();process.exit(1);},35000).unref();});
 }
