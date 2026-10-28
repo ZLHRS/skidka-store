@@ -1,4 +1,9 @@
 import http from 'node:http';
+import {spawn} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {setPriority,constants as osConstants} from 'node:os';
+import {startCatalogueScheduler} from './lib/catalogue-scheduler.mjs';
+import {setSharedSmallState,publicSmallState} from './lib/small-service.js';
 import {isIP} from 'node:net';
 import {mkdirSync,readFileSync,writeFileSync,renameSync,statSync} from 'node:fs';
 import {dirname,resolve,join} from 'node:path';
@@ -13,6 +18,22 @@ export function configureCataloguePersistence(dbPath){
  for(const city of ['astana','petropavlovsk'])try{if(statSync(file(city)).size<6000000)magnumCache.restore(city,JSON.parse(readFileSync(file(city),'utf8')))}catch(e){if(e.code!=='ENOENT')console.warn('Catalogue restore failed:',e.message)}
  magnumCache.setPersistence((city,snapshot)=>{writeFileSync(file(city)+'.tmp',JSON.stringify(snapshot),{mode:0o600});renameSync(file(city)+'.tmp',file(city))});
  for(const city of ['astana','petropavlovsk'])void magnumCache.read(city);
+}
+
+export function configureAutomaticUpdates(dbPath){
+ const file=join(dirname(dbPath),'catalogue-small.json');
+ const restore=()=>{try{if(statSync(file).size>10000000)throw Error('Saved SMALL catalogue too large');setSharedSmallState(JSON.parse(readFileSync(file,'utf8')))}catch(e){if(e.code!=='ENOENT')throw e}};
+ try{restore()}catch(e){console.warn('SMALL restore failed:',e.message)}
+ let child;
+ const stop=startCatalogueScheduler({smallCheckedAt:publicSmallState().checkedAt,
+  refreshMagnum:async()=>{for(const city of ['astana','petropavlovsk'])await magnumCache.refresh(city)},
+  refreshSmall:()=>new Promise((resolve,reject)=>{
+   child=spawn(process.execPath,['--max-old-space-size=256',fileURLToPath(new URL('./small-update.mjs',import.meta.url)),file],{stdio:['ignore','inherit','inherit'],windowsHide:true,timeout:20*60*1000});
+   try{setPriority(child.pid,osConstants.priority.PRIORITY_BELOW_NORMAL)}catch{}
+   child.once('error',reject);child.once('exit',(code,signal)=>{child=null;if(code!==0){reject(Error('OCR worker stopped: '+(signal||code)));return}try{restore();console.log('SMALL automatic catalogue checked:',publicSmallState().checkedAt);resolve()}catch(e){reject(e)}});
+  })
+ });
+ return ()=>{stop();child?.kill()};
 }
 
 export function configFromEnv(env=process.env){
@@ -57,6 +78,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).hr
  process.umask(0o077);
  const config=configFromEnv(),server=createVpsServer(config);
  configureCataloguePersistence(config.dbPath);
+ const stopUpdates=configureAutomaticUpdates(config.dbPath);
  server.listen(config.port,'127.0.0.1',()=>console.log('По скидке:',config.origin,'upstream 127.0.0.1:'+config.port));
- for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>{server.close(()=>process.exit(0));setTimeout(()=>{server.closeAllConnections();process.exit(1);},35000).unref();});
+ for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>{stopUpdates();server.close(()=>process.exit(0));setTimeout(()=>{server.closeAllConnections();process.exit(1);},35000).unref();});
 }

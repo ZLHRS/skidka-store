@@ -1,6 +1,6 @@
 # «По скидке»: skidka.store на Google Cloud через GitHub
 
-Это отдельная версия приложения для Ubuntu/Debian с Node.js 24, Caddy и SQLite. В этой папке есть код сайта, PWA, парсер Magnum, импорт SMALL и свои аккаунты. Пакеты npm для запуска не нужны. Node.js нужен именно ветки 24.x.
+Это отдельная версия приложения для Ubuntu/Debian с Node.js 24, Caddy и SQLite. В этой папке есть код сайта, PWA, парсер Magnum, импорт SMALL и свои аккаунты. Для серверного OCR SMALL нужны зависимости из pnpm-lock.yaml. Node.js нужен именно ветки 24.x.
 
 Загрузи в корень своего GitHub-репозитория содержимое этой папки po-skidke-vps: в корне должны лежать server.mjs, package.json и папка deploy. Локальная папка magnum-astana предназначена для Sites и разработки; для своего сервера используй эту серверную версию. Пароли сервера, ключи, .env и базы в GitHub не загружай. При первом запуске создаётся пустая база. Существующие логины, избранное и фильтры потребуют отдельного переноса данных из действующей Cloudflare D1. Копирование кода само по себе их не переносит.
 
@@ -93,6 +93,7 @@ git clone https://github.com/YOUR_LOGIN/YOUR_REPOSITORY.git ~/po-skidke-code
 sudo mkdir -p /opt/po-skidke
 sudo cp -a ~/po-skidke-code/. /opt/po-skidke/
 cd /opt/po-skidke
+npx --yes pnpm@11.25.0 install --frozen-lockfile --prod --ignore-scripts
 sudo useradd --system --user-group --home-dir /var/lib/po-skidke --no-create-home --shell /usr/sbin/nologin po-skidke
 sudo install -m 0600 deploy/app.env.example /etc/po-skidke.env
 sudo nano /etc/po-skidke.env
@@ -233,6 +234,7 @@ curl http://127.0.0.1:4173/health
 ```bash
 cd ~/po-skidke-code
 git pull --ff-only
+npx --yes pnpm@11.25.0 install --frozen-lockfile --prod --ignore-scripts
 sudo cp -a ~/po-skidke-code/. /opt/po-skidke/
 sudo systemctl restart po-skidke
 curl http://127.0.0.1:4173/health
@@ -243,3 +245,7 @@ curl http://127.0.0.1:4173/health
 ## Что проверено здесь
 
 Код запуска и тесты проверены локально с Node.js 24: вход с HTTPS-origin за локальным прокси, Secure-cookie, сохранение аккаунтов после перезапуска, создание и проверка резервной копии. Команды apt/systemd/Caddy приведены для выполнения на Linux; на твоём VPS и с настоящим доменом они ещё не запускались.
+
+## Автоматические каталоги
+
+После запуска сервер проверяет Magnum для обоих городов каждые 15 минут. SMALL проверяется каждые 6 часов; новые выпуски Астаны распознаются отдельным процессом с пониженным приоритетом. После ошибки SMALL повторяет проверку через час. Задания не перекрываются. Состояние и языковые модели OCR сохраняются рядом с accounts.sqlite; кэш переживает перезапуск. Вход и открытая вкладка для обновлений не нужны. Открытая страница перечитывает каталог раз в минуту. При ошибках сохраняется предыдущий выпуск, истёкшие предложения скрываются.
