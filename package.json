@@ -1,0 +1,13 @@
+{
+  "name": "po-skidke-vps",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "backup": "node backup.mjs"
+  }
+}

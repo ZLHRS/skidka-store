@@ -1,0 +1,11 @@
+.env
+*.sqlite
+*.sqlite-*
+node_modules/
+.local/
+backups/
+*.log
+.env.*
+!.env.example
+*.pem
+*.key
