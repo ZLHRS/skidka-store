@@ -6,13 +6,13 @@ import {accountRoute,getAccount,favoriteKey} from '../lib/accounts.js';
 import {CLIENT} from '../client.js';
 import {CATEGORIES,categoryForProduct} from '../lib/categories.js';
 import {smallCatalog} from '../lib/small.js';
-import {smallRoute,userSmallState,chooseSmallSnapshot} from '../lib/small-service.js';
+import {smallRoute,userSmallState,chooseSmallSnapshot,publicSmallState} from '../lib/small-service.js';
 import {SMALL_READER} from '../lib/small-reader.js';
 import {SMALL_OCR_CLIENT} from '../lib/small-ocr.js';
 import {FILTER_CLIENT} from '../lib/filters.js';
 import {magnumCache} from '../lib/magnum-cache.js';
 const magnumDeals=(city,force=false)=>magnumCache.read(city,force);
-async function deals(city='astana',force=false,state=null){const [magnum,small]=await Promise.all([magnumDeals(city,force),Promise.resolve(smallCatalog(new Date(),chooseSmallSnapshot(state)))]);return {...magnum,cityId:city,cities:CITIES,chains:CHAINS.filter(c=>STORES.some(s=>s.city===city&&s.chain===c.id)),stores:STORES.filter(s=>s.city===city),smallCatalog:city==='astana'?{...small.metadata,checkedAt:state?.checkedAt}:null,products:[...magnum.products.map(p=>({...p,city,chain:'magnum',scope:'store'})),...(city==='astana'?small.products.map(p=>({...p,city})):[])]}}
+async function deals(city='astana',force=false,state=null){const [magnum,small]=await Promise.all([magnumDeals(city,force),Promise.resolve(smallCatalog(new Date(),chooseSmallSnapshot(state)))]);return {...magnum,cityId:city,cities:CITIES,chains:CHAINS.filter(c=>STORES.some(s=>s.city===city&&s.chain===c.id)),stores:STORES.filter(s=>s.city===city),smallCatalog:city==='astana'?{...small.metadata,checkedAt:publicSmallState().checkedAt||state?.checkedAt}:null,products:[...magnum.products.map(p=>({...p,city,chain:'magnum',scope:'store'})),...(city==='astana'?small.products.map(p=>({...p,city})):[])]}}
 export default {async fetch(request,env){
  const url=new URL(request.url),city=CITIES.some(c=>c.id===url.searchParams.get('city'))?url.searchParams.get('city'):'astana';
  if(request.method==='GET'&&url.pathname==='/manifest.webmanifest')return Response.json({...PWA_MANIFEST,related_applications:[{platform:'webapp',url:url.origin+'/manifest.webmanifest?v=2',id:url.origin+'/'}]},{headers:{'Content-Type':'application/manifest+json; charset=utf-8','Cache-Control':'no-cache'}});
@@ -23,7 +23,7 @@ export default {async fetch(request,env){
  if(request.method!=='GET')return new Response('Method not allowed',{status:405,headers:{Allow:'GET'}});
  if(url.pathname==='/api/deals'){
   const user=env?.DB&&await getAccount(request,env.DB),state=user?await userSmallState(env.DB,user):null;
-  const data=await deals(city,url.searchParams.get('refresh')==='1',state),imageVersion=chooseSmallSnapshot(state).importedAt;
+  const data=await deals(city,false,state),imageVersion=chooseSmallSnapshot(state).importedAt;
   return Response.json({...data,categories:CATEGORIES,products:data.products.map(p=>({...p,image:p.chain==='small'&&p.image?.startsWith('data:')?'/api/small-image?id='+encodeURIComponent(p.id)+'&v='+encodeURIComponent(imageVersion):p.image,key:favoriteKey(p),category:categoryForProduct(p)}))},{headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
  }
  if(url.pathname==='/api/small-image'){
