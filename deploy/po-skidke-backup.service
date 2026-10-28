@@ -1,0 +1,16 @@
+[Unit]
+Description=Po Skidke database backup
+ConditionPathExists=/var/lib/po-skidke/accounts.sqlite
+
+[Service]
+Type=oneshot
+User=po-skidke
+Group=po-skidke
+EnvironmentFile=/etc/po-skidke.env
+ExecStart=/usr/bin/node /opt/po-skidke/backup.mjs
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/po-skidke

@@ -1,0 +1,10 @@
+skidka.store {
+    encode gzip
+    reverse_proxy 127.0.0.1:4173 {
+        header_up X-Real-IP {remote_host}
+    }
+}
+
+www.skidka.store {
+    redir https://skidka.store{uri} permanent
+}
