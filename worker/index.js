@@ -1,9 +1,7 @@
 import {PWA_MANIFEST,PWA_WORKER,PWA_CLIENT} from '../lib/pwa.js';
 import {PWA_ICONS} from '../lib/pwa-icons.js';
-import {scrape,currentSnapshot,STORES,CHAINS,CITIES} from '../lib/parser.js';
+import {STORES,CHAINS,CITIES} from '../lib/parser.js';
 import {HTML} from '../ui.js';
-import {PETRO_SNAPSHOT} from '../data/petro-snapshot.js';
-import {SNAPSHOT} from '../data/snapshot.js';
 import {accountRoute,getAccount,favoriteKey} from '../lib/accounts.js';
 import {CLIENT} from '../client.js';
 import {CATEGORIES,categoryForProduct} from '../lib/categories.js';
@@ -12,13 +10,8 @@ import {smallRoute,userSmallState,chooseSmallSnapshot} from '../lib/small-servic
 import {SMALL_READER} from '../lib/small-reader.js';
 import {SMALL_OCR_CLIENT} from '../lib/small-ocr.js';
 import {FILTER_CLIENT} from '../lib/filters.js';
-const latestByCity=new Map(),pendingByCity=new Map(),TTL=10*60*1000;
-async function magnumDeals(city,force=false){
- const latest=latestByCity.get(city);
- if(!force&&latest&&Date.now()-Date.parse(latest.fetchedAt)<TTL)return {...currentSnapshot(latest),stale:false};
- if(!pendingByCity.has(city))pendingByCity.set(city,scrape(fetch,new Date(),city).then(result=>{latestByCity.set(city,result);return result}).finally(()=>pendingByCity.delete(city)));
- try{return {...currentSnapshot(await pendingByCity.get(city)),stale:false}}catch(e){console.warn('Magnum refresh failed:',city,e.message);return {...currentSnapshot(latest||(city==='astana'?SNAPSHOT:PETRO_SNAPSHOT)),stale:true}}
-}
+import {magnumCache} from '../lib/magnum-cache.js';
+const magnumDeals=(city,force=false)=>magnumCache.read(city,force);
 async function deals(city='astana',force=false,state=null){const [magnum,small]=await Promise.all([magnumDeals(city,force),Promise.resolve(smallCatalog(new Date(),chooseSmallSnapshot(state)))]);return {...magnum,cityId:city,cities:CITIES,chains:CHAINS.filter(c=>STORES.some(s=>s.city===city&&s.chain===c.id)),stores:STORES.filter(s=>s.city===city),smallCatalog:city==='astana'?{...small.metadata,checkedAt:state?.checkedAt}:null,products:[...magnum.products.map(p=>({...p,city,chain:'magnum',scope:'store'})),...(city==='astana'?small.products.map(p=>({...p,city})):[])]}}
 export default {async fetch(request,env){
  const url=new URL(request.url),city=CITIES.some(c=>c.id===url.searchParams.get('city'))?url.searchParams.get('city'):'astana';
@@ -29,8 +22,15 @@ export default {async fetch(request,env){
  if(['/api/profile','/api/preferences','/api/favorites'].includes(url.pathname)||url.pathname.startsWith('/api/auth/'))return accountRoute(request,env,async()=>{const user=await getAccount(request,env.DB);return deals(city,false,user?await userSmallState(env.DB,user):null)});
  if(request.method!=='GET')return new Response('Method not allowed',{status:405,headers:{Allow:'GET'}});
  if(url.pathname==='/api/deals'){
-  const user=env?.DB&&await getAccount(request,env.DB);if(!user)return Response.json({error:'Войди в аккаунт'},{status:401,headers:{'Cache-Control':'no-store'}});
-  const data=await deals(city,url.searchParams.get('refresh')==='1',await userSmallState(env.DB,user));return Response.json({...data,categories:CATEGORIES,products:data.products.map(p=>({...p,key:favoriteKey(p),category:categoryForProduct(p)}))},{headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+  const user=env?.DB&&await getAccount(request,env.DB),state=user?await userSmallState(env.DB,user):null;
+  const data=await deals(city,url.searchParams.get('refresh')==='1',state),imageVersion=chooseSmallSnapshot(state).importedAt;
+  return Response.json({...data,categories:CATEGORIES,products:data.products.map(p=>({...p,image:p.chain==='small'&&p.image?.startsWith('data:')?'/api/small-image?id='+encodeURIComponent(p.id)+'&v='+encodeURIComponent(imageVersion):p.image,key:favoriteKey(p),category:categoryForProduct(p)}))},{headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+ }
+ if(url.pathname==='/api/small-image'){
+  const user=env?.DB&&await getAccount(request,env.DB),snapshot=chooseSmallSnapshot(user?await userSmallState(env.DB,user):null);
+  const product=snapshot.products.find(p=>String(p.id)===url.searchParams.get('id')),match=product?.image?.match(/^data:image\/(jpeg|png);base64,([a-zA-Z0-9+/=]+)$/);
+  if(url.searchParams.get('v')!==snapshot.importedAt||!match)return new Response('Not found',{status:404});
+  return new Response(Uint8Array.from(atob(match[2]),c=>c.charCodeAt(0)),{headers:{'Content-Type':'image/'+match[1],'Cache-Control':'private, max-age=86400','Vary':'Cookie','X-Content-Type-Options':'nosniff'}});
  }
  if(url.pathname==='/small-reader.js')return new Response(SMALL_READER.replace('/*OCR_HELPERS*/',()=>SMALL_OCR_CLIENT),{headers:{'Content-Type':'text/javascript; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
  if(url.pathname==='/health')return Response.json({ok:true});
